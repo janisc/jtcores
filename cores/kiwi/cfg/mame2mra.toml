@@ -77,6 +77,10 @@ regions = [
     { name="gfx1", start="JTFRAME_BA3_START", width=32, sequence=[2,0,3,1] },
     { machines=["kageki", "tnzs", "chukatai","drtoppel" ], name="gfx1", start="JTFRAME_BA3_START", width=32, sequence=[4,0,6,2, 5,1,7,3] },
     { machines=["plumppop"], name="gfx1", start="JTFRAME_BA3_START", width=32, sequence=[4,0,6,2, 4,0,6,2, 5,1,7,3, 5,1,7,3 ] },
+    # Arkanoid 2 marks empty brick cells with sprite code 0x2000. Code bit 13 is not connected to the
+    # graphics ROMs on the PCB (sch/arknoid2/gfx.kicad_sch), so the ROMs are repeated over the whole
+    # region instead of padding it. See doc/arknoid2_gfx.md
+    { machines=["arknoid2"], name="gfx1", start="JTFRAME_BA3_START", width=32, sequence=[2,0,3,1, 2,0,3,1, 2,0,3,1, 2,0,3,1] },
     { machine="insectx",           name="gfx1", start="JTFRAME_BA3_START", width=16, no_offset=true },
     { name="proms", start="JTFRAME_PROM_START", No_offset=true },
     { name="mcu", start="MCU_START", No_offset=true, len=0x800, custom={ dev="8042" } },
