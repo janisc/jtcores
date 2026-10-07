@@ -17,9 +17,15 @@
 ;   DATE: 24-4-2023
 ;
 ;   FIRMWARE COMPATIBLE WITH ARKANOID 2
+;
+;   26-9-2026: DBB ONLY GETS A BYTE THAT THE Z80 IS GOING TO READ. WHEN THE
+;   MAIN LOOP REFILLED DBB WITH THE INPUTS WHENEVER IT WAS EMPTY, THE Z80 COULD
+;   READ THAT BYTE INSTEAD OF THE REPLY TO 54/41/DATA WHEN A GAME STARTS AND
+;   STOP WITH ERROR $0E (COIN OVERFLOW). SEE cores/kiwi/doc/arknoid2_mcu.md
 
 	RELAXED ON
 
+PEND	EQU	R3	; 1 = SEND THE INPUTS ONCE THE C1 CREDITS BYTE IS READ
 CMD	EQU	R4
 REPORT 	EQU	R5
 OLDCOIN	EQU	R6
@@ -91,18 +97,25 @@ COINAGE:
 	DJNZ R1,COINAGE
 
 	TOMAIN $5A	; final initialization signal
+	MOV A,#0
+	MOV STS,A	; the handshake value does not stay in the coin code bits
 
 	MOV CREDITS,#0
 	MOV REPORT,#0
+	MOV PEND,#0
 	; Poll the coin switches independently from the Z80's C1 command.
 	; The timer overflow throttles this polling and gives short pulses a
 	; chance to be latched without keeping the status code asserted.
 	MOV A,#211
 	MOV T,A
 	STRT T
-	; infinite loop to read cabinet inputs
-L:  	JOBF L2
-	JMP CKCMD
+	; infinite loop to read cabinet inputs. DBB only gets a byte when the Z80
+	; is going to read it, so a reply can never be preceded by a stale byte
+L:  	JOBF L2		; a reply is still waiting to be read
+	MOV A,PEND
+	JZ L2
+	MOV PEND,#0	; the C1 credits were read, now send the inputs
+	CALL SENDBTN
 L2:	CALL RDCOINS
 	JNIBF L
 	IN A,DBB
@@ -129,17 +142,28 @@ A1WR:
 	MOV REPORT,#0
 	MOV A,CREDITS
 	OUT DBB,A
+	MOV PEND,#1	; the inputs follow as the second byte
 	JMP L
-CK15:	; if CMD=15, decrement the credits by 1
+CK15:	; if CMD=15, decrement the credits by 1 (no reply)
 	MOV A,CMD
 	ADD A,#$EB	; -$15
-	JNZ L
+	JNZ CK54
 	MOV A,CREDITS
-	JZ CKCMD
+	JZ L
 	DEC CREDITS
 	JMP L
+CK54:	; 54 and 41 announce a data byte: no reply yet
+	MOV A,CMD
+	ADD A,#$AC	; -$54
+	JZ L
+	MOV A,CMD
+	ADD A,#$BF	; -$41
+	JZ L
+	; any other command (test mode coin lockouts 8x) is answered with the inputs
+	CALL SENDBTN
+	JMP L
 
-CKCMD:	; output buttons, all inactive for now
+SENDBTN: ; output buttons, all inactive for now
 	; A coin report belongs to one C1 reply only.  Clearing the status
 	; here prevents a stale coin code from being counted more than once.
 	MOV A,#0
@@ -159,8 +183,11 @@ CKCMD:	; output buttons, all inactive for now
 	ORL A,#$F0
 	ANL A,R0	; 1P+2P inputs ready
        	OUT DBB,A
-	JMP L
+	RET
 
+	; the coin routines live in the second page: conditional jumps only reach
+	; targets inside their own 256-byte page and the code outgrew the first one
+	ORG $100
 RDCOINS:
 	; The timer keeps this independent from C1 but avoids re-sampling on
 	; every pass through the UPI-41 wait loop.
